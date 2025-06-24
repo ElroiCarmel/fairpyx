@@ -3,15 +3,18 @@ Compare the performance of the maximally proportional algorithms
 to other algorithms in terms of bundles proportionallity
 """
 
+import os
 import logging
 import experiments_csv as ex_csv
+import pandas as pd
+import matplotlib.pyplot as plt
 from fairpyx import divide, Instance
 from fairpyx.algorithms.maximally_proportional import maximally_proportional_allocation
 from fairpyx.algorithms import round_robin
 from random import sample
 
+
 def dividor(algorithm, seed: int, nagents: int, nitems: int) -> dict:
-    nagents = round(1/nagents)
     instance = Instance.random_uniform(
         num_of_agents=nagents,
         num_of_items=nitems,
@@ -36,20 +39,38 @@ def dividor(algorithm, seed: int, nagents: int, nitems: int) -> dict:
 
     return {"utility_sum": util_sum, "min_proportional_utility": min_prop}
 
+
+def run_multi_exp():
+    agents_range = range(2, 51)
+    seeds = sorted(sample(range(2**32), 5))
+    for nagents in agents_range:
+        ex = ex_csv.Experiment(
+            results_folder=os.path.join("results", "max_prop", "results"),
+            results_filename=f"{nagents}_agents.csv",
+        )
+        input_ranges = {
+            "nagents": [nagents],
+            "nitems": range(nagents, 51),
+            "seed": seeds,
+            "algorithm": [maximally_proportional_allocation, round_robin],
+        }
+        ex.run_with_time_limit(dividor, input_ranges, time_limit=60)
+
+
+def plots():
+    for nagents in range(2, 24):
+        ex_csv.single_plot_results(
+            results_csv_file=os.path.join('experiments','results','max_prop','results', f"{nagents}_agents.csv"),
+            filter={"nagents": nagents},
+            x_field="nitems",
+            y_field="min_proportional_utility",
+            z_field="algorithm",
+            # title=f"{nagents} agents"
+        )
+        # plt.title(f"{nagents} agents")
+        plt.show()
+
+
 if __name__ == "__main__":
-    ex = ex_csv.Experiment(results_filename="maximally_proportional.csv")
-    # ex.logger.setLevel(logging.DEBUG)
-    # stream_handler = logging.StreamHandler()
-    # file_handler = logging.FileHandler("experiment.log", mode="w", encoding="utf-8")
-    # formatter = logging.Formatter(fmt="{asctime} - {message}", style="{")
-    # file_handler.setFormatter(formatter)
-    # ex.logger.addHandler(stream_handler)
-        
-    input_ranges = {
-    "nagents": [1/n for n in range(2, 50)],
-    "nitems": range(4, 50),
-    "seed": sorted(sample(range(2**32), 5)),
-    "algorithm": [maximally_proportional_allocation, round_robin],
-    }
-    # ex.clear_previous_results()
-    ex.run_with_time_limit(dividor, input_ranges, time_limit=60)
+    plots()
+    # run_multi_exp()
