@@ -8,18 +8,24 @@ Programmer: Elroi Carmel
 Date: 2025-05
 """
 
+import logging
+import numpy as np
+import cvxpy as cp
 from fairpyx import Instance, AllocationBuilder, divide
-from typing import Any
+from fairpyx.algorithms.minimal_bundles_utils import recursive
+from typing import Any, Optional
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from itertools import chain
 from math import isclose
-import logging, cvxpy as cp
+
 
 logger = logging.getLogger(__name__)
 
 
-def maximally_proportional_allocation(alloc: AllocationBuilder):
+def maximally_proportional_allocation(
+    alloc: AllocationBuilder, min_bundles_bound: Optional[int | float] = np.inf
+):
     """
     Finds an allocation maximizing the possible number of players with proportional bundles,
     guaranteeing the best attainable minimum rank among them.
@@ -43,7 +49,9 @@ def maximally_proportional_allocation(alloc: AllocationBuilder):
 
     agents = alloc.remaining_agents()
     minimal_bundles_by_agent = {
-        agent: compute_minimal_bundles_for_agent(alloc, agent, sort_bundle=False)
+        agent: compute_minimal_bundles_for_agent(
+            recursive, alloc.instance, agent, sort_bundle=False
+        )
         for agent in agents
     }
     logger.info("Collected minimal bundles by order of priorities for all agents")
@@ -144,73 +152,9 @@ def maximally_proportional_allocation(alloc: AllocationBuilder):
 
 
 def compute_minimal_bundles_for_agent(
-    alloc: AllocationBuilder, agent: Any, sort_bundle: bool = True
+    strategy: Callable, alloc: Instance, agent: Any, **kwargs
 ) -> list:
-    """
-    Finds all of the agent's minimal bundles and returns them in descending
-    order by their total value.
-
-    Args:
-        alloc (AllocationBuilder): Used to retrive the items and the agent's utility
-        agent (Any): One of the agents
-
-    Returns:
-        list: agent's minimal bundle
-
-    Examples:
-    >>> val = [[35, 30, 10, 25],[25, 21, 34, 20],[16, 32, 12, 38], [91, 66, 12, 89]]
-    >>> instance = Instance(valuations=val)
-    >>> alloc = AllocationBuilder(instance)
-    >>> compute_minimal_bundles_for_agent(alloc, 0)
-    [[0], [1], [3]]
-    >>> compute_minimal_bundles_for_agent(alloc, 1)
-    [[1, 3], [2], [0]]
-    >>> compute_minimal_bundles_for_agent(alloc, 2)
-    [[3], [1], [0, 2]]
-    >>> compute_minimal_bundles_for_agent(alloc, 3)
-    [[0], [3], [1]]
-    >>> val = [[15, 33, 16, 6, 26], [34, 38, 4, 16, 8]]
-    >>> alloc = AllocationBuilder(Instance(valuations=val))
-    >>> compute_minimal_bundles_for_agent(alloc, 0)
-    [[1, 4], [0, 2, 4], [1, 2], [0, 1], [2, 3, 4]]
-    >>> compute_minimal_bundles_for_agent(alloc, 1)
-    [[0, 1], [1, 3], [1, 2, 4], [0, 3]]
-    """
-    res = []
-    logger.info(' Collecting all of agent "%s" minimal bundles '.center(50, "#"), agent)
-    items_sorted = sorted(
-        alloc.remaining_items(),
-        key=lambda x: alloc.effective_value(agent, x),
-        reverse=True,
-    )
-    proportional_share = alloc.agent_bundle_value(agent, alloc.remaining_items()) / len(
-        alloc.remaining_agents()
-    )
-    logger.info("Proportional value of agent %s is %s", agent, proportional_share)
-    subgroup = []
-
-    def backtrack(i, bundle_value):
-        logger.debug("Assesing subgroup %s", subgroup)
-        if bundle_value >= proportional_share:
-            res.append(sorted(subgroup) if sort_bundle else list(subgroup))
-            logger.debug(
-                "Subgroup is minimal bundle! total value: %s. Added to result",
-                bundle_value,
-            )
-        elif i >= len(items_sorted):
-            logger.debug("No left items to grow the group")
-            return
-        else:
-            logger.debug("Subgroup total value is too low. Add some item")
-            item = items_sorted[i]
-            subgroup.append(item)
-            backtrack(i + 1, bundle_value + alloc.effective_value(agent, item))
-            subgroup.pop()
-            backtrack(i + 1, bundle_value)
-
-    backtrack(0, 0)
-    res.sort(key=lambda bundle: alloc.agent_bundle_value(agent, bundle), reverse=True)
-    return res
+    return strategy(alloc, agent, **kwargs)
 
 
 def add_bundle_indicator_vars(
@@ -254,20 +198,17 @@ def maximise_agent_coverage(
     Returns:
        Mapping[Hashable, int]: Mapper from agent to the rank of the bundle given to him
     """
-    agents_constraint = list(map(lambda x: sum(x) <= 1, bundles_vars_by_agent.values()))
-    items_constraints = list(map(lambda x: sum(x) <= 1, bundles_vars_by_item.values()))
-
-    constraints = agents_constraint + items_constraints
+    constraints = []
+    for bundles in chain(bundles_vars_by_agent.values(), bundles_vars_by_item.values()):
+        constraints.append(cp.sum(cp.hstack(bundles)) <= 1)
 
     # Collect of all the bundles Variabls to one list
-
     all_bundles_vars = list(chain.from_iterable(bundles_vars_by_agent.values()))
 
-    objective = cp.Maximize(cp.sum(all_bundles_vars))
+    objective = cp.Maximize(cp.sum(cp.hstack(all_bundles_vars)))
 
     prob = cp.Problem(objective=objective, constraints=constraints)
     prob.solve()
-
     # Extract soliution from cvxpy Variables
 
     alloc_by_rank = {}
@@ -307,33 +248,36 @@ def find_pareto_dominating_alloc(
     for agent, rank in maxmin_alloc.items():
         updated_vars_by_agent[agent] = bundles_vars_by_agent[agent][: rank + 1]
 
-    agents_constraint = list(map(lambda x: sum(x) <= 1, updated_vars_by_agent.values()))
-    items_constraints = list(map(lambda x: sum(x) <= 1, bundles_vars_by_item.values()))
+    constraints = []
+    for bundles in chain(updated_vars_by_agent.values(), bundles_vars_by_item.values()):
+        constraints.append(cp.sum(cp.hstack(bundles)) <= 1)
 
     # Collect of all the bundles Variabls to one list
 
-    all_bundles_vars = list(chain.from_iterable(updated_vars_by_agent.values()))
+    all_bundles_vars = cp.hstack(
+        list(chain.from_iterable(updated_vars_by_agent.values()))
+    )
 
     # Number of agents that must receive a bundle
 
-    num_agents_receiving_constraint = [sum(all_bundles_vars) == len(maxmin_alloc)]
-
-    constraints = (
-        agents_constraint + items_constraints + num_agents_receiving_constraint
-    )
-
+    constraints.append(cp.sum(all_bundles_vars) == len(maxmin_alloc))
     # Search for an allocation that Pareto-dominates the current max-min
     # allocation.  Give each bundle variable a weight from 0 (most preferred)
     # down to −(num_min_bundles).  For example, if Alice has five
     # minimal bundles, their weights are 0, −1, −2, −3, −4.  With these
     # weights, a CVXPY maximisation will yield the desired allocation.
 
-    weighted_vars = []
-    for bundle_vars in updated_vars_by_agent.values():
-        for rank, bv in enumerate(bundle_vars):
-            weighted_vars.append(-rank * bv)
+    # ❷  Build a NumPy weight array that matches the *order*
+    weights = -np.concatenate(
+        [
+            np.arange(len(bundle_vars))  # 0,-1,-2,…
+            for bundle_vars in updated_vars_by_agent.values()
+        ]
+    )
 
-    objective = cp.Maximize(sum(weighted_vars))
+    # ❸  Single dot-product node
+    objective = cp.Maximize(weights @ all_bundles_vars)
+
     prob = cp.Problem(objective=objective, constraints=constraints)
     prob.solve()
 
@@ -349,25 +293,25 @@ def find_pareto_dominating_alloc(
 
 if __name__ == "__main__":
     import doctest, random, numpy as np
+
     # print(doctest.testmod())
     np.set_printoptions(legacy="1.25")
 
-
-    RAND_SEED = random.randint(1,10000)
+    RAND_SEED = random.randint(1, 10000)
+    nagents, nitems = 2, 26
     instance = Instance.random_uniform(
-        num_of_agents=5,
-        num_of_items=10,
+        num_of_agents=nagents,
+        num_of_items=nitems,
         item_capacity_bounds=(1, 1),
-        agent_capacity_bounds=(10, 10),
-        item_base_value_bounds=(20, 25),
+        agent_capacity_bounds=(nitems, nitems),
+        item_base_value_bounds=(20, 80),
         item_subjective_ratio_bounds=(0.5, 3.0),
-        normalized_sum_of_values=50,
+        normalized_sum_of_values=100,
         random_seed=RAND_SEED,
     )
     print(instance._valuations)
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.addHandler(logging.StreamHandler())
-    alloc = divide(maximally_proportional_allocation, instance)
+    alloc = divide(maximally_proportional_allocation, instance, min_bundles_bound=500)
     print(alloc)
-
