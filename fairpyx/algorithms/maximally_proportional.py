@@ -18,13 +18,18 @@ from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from itertools import chain
 from math import isclose
+from functools import partial
+from concurrent.futures import ProcessPoolExecutor
 
 
 logger = logging.getLogger(__name__)
 
 
 def maximally_proportional_allocation(
-    alloc: AllocationBuilder, min_bundles_bound: Optional[int | float] = np.inf
+    alloc: AllocationBuilder,
+    min_bundles_bound: Optional[int | float] = np.inf,
+    min_bundles_strategy: Callable = recursive,
+    parallel: bool = False,
 ):
     """
     Finds an allocation maximizing the possible number of players with proportional bundles,
@@ -48,19 +53,32 @@ def maximally_proportional_allocation(
     """
 
     agents = alloc.remaining_agents()
-    minimal_bundles_by_agent = {
-        agent: compute_minimal_bundles_for_agent(
-            recursive, alloc.instance, agent, sort_bundle=False
+    if parallel:
+        mb_func = partial(
+            compute_minimal_bundles_for_agent,
+            min_bundles_strategy,
+            None,
+            raw_valuation=alloc.instance._valuations,
         )
-        for agent in agents
-    }
-    logger.info("Collected minimal bundles by order of priorities for all agents")
+        with ProcessPoolExecutor() as executor:
+            mb = executor.map(mb_func, agents)
+            minimal_bundles_by_agent = dict(zip(agents, mb))
+    else:
+        minimal_bundles_by_agent = {
+            agent: compute_minimal_bundles_for_agent(
+                min_bundles_strategy,
+                alloc.instance,
+                agent,
+            )
+            for agent in agents
+        }
+        logger.info("Collected minimal bundles by order of priorities for all agents")
 
-    num_min_bun_by_agent = {
-        agent: len(min_bundles)
-        for agent, min_bundles in minimal_bundles_by_agent.items()
-    }
-    logger.info("Amount of minimal bundles: %s", num_min_bun_by_agent)
+        num_min_bun_by_agent = {
+            agent: len(min_bundles)
+            for agent, min_bundles in minimal_bundles_by_agent.items()
+        }
+        logger.info("Amount of minimal bundles: %s", num_min_bun_by_agent)
 
     # Each minimal bundle will be represented by a boolean cvxp.Variable instance that will be used
     # by cvxpy module to maximize the amount of bundles given at each iteration.
@@ -152,9 +170,17 @@ def maximally_proportional_allocation(
 
 
 def compute_minimal_bundles_for_agent(
-    strategy: Callable, alloc: Instance, agent: Any, **kwargs
+    strategy: Callable,
+    instance: Instance,
+    agent: Any,
+    raw_valuation: dict | list = None,
+    **kwargs
 ) -> list:
-    return strategy(alloc, agent, **kwargs)
+    if raw_valuation:
+        instance = Instance(raw_valuation)
+    res = strategy(instance, agent, **kwargs)
+    res.sort(key=partial(instance.agent_bundle_value, agent), reverse=True)
+    return res
 
 
 def add_bundle_indicator_vars(
@@ -198,17 +224,24 @@ def maximise_agent_coverage(
     Returns:
        Mapping[Hashable, int]: Mapper from agent to the rank of the bundle given to him
     """
-    constraints = []
-    for bundles in chain(bundles_vars_by_agent.values(), bundles_vars_by_item.values()):
-        constraints.append(cp.sum(cp.hstack(bundles)) <= 1)
+    agents_constraint = [
+        cp.sum(cp.hstack(x)) <= 1 for x in bundles_vars_by_agent.values()
+    ]
+    items_constraints = [
+        cp.sum(cp.hstack(x)) <= 1 for x in bundles_vars_by_item.values()
+    ]
+
+    constraints = agents_constraint + items_constraints
 
     # Collect of all the bundles Variabls to one list
+
     all_bundles_vars = list(chain.from_iterable(bundles_vars_by_agent.values()))
 
     objective = cp.Maximize(cp.sum(cp.hstack(all_bundles_vars)))
 
     prob = cp.Problem(objective=objective, constraints=constraints)
     prob.solve()
+
     # Extract soliution from cvxpy Variables
 
     alloc_by_rank = {}
@@ -248,36 +281,39 @@ def find_pareto_dominating_alloc(
     for agent, rank in maxmin_alloc.items():
         updated_vars_by_agent[agent] = bundles_vars_by_agent[agent][: rank + 1]
 
-    constraints = []
-    for bundles in chain(updated_vars_by_agent.values(), bundles_vars_by_item.values()):
-        constraints.append(cp.sum(cp.hstack(bundles)) <= 1)
+    agents_constraint = [
+        cp.sum(cp.hstack(x)) <= 1 for x in updated_vars_by_agent.values()
+    ]
+    items_constraints = [
+        cp.sum(cp.hstack(x)) <= 1 for x in bundles_vars_by_item.values()
+    ]
 
     # Collect of all the bundles Variabls to one list
 
-    all_bundles_vars = cp.hstack(
-        list(chain.from_iterable(updated_vars_by_agent.values()))
-    )
+    all_bundles_vars = list(chain.from_iterable(updated_vars_by_agent.values()))
 
     # Number of agents that must receive a bundle
 
-    constraints.append(cp.sum(all_bundles_vars) == len(maxmin_alloc))
+    num_agents_receiving_constraint = [
+        cp.sum(cp.hstack(all_bundles_vars)) == len(maxmin_alloc)
+    ]
+
+    constraints = (
+        agents_constraint + items_constraints + num_agents_receiving_constraint
+    )
+
     # Search for an allocation that Pareto-dominates the current max-min
     # allocation.  Give each bundle variable a weight from 0 (most preferred)
     # down to −(num_min_bundles).  For example, if Alice has five
     # minimal bundles, their weights are 0, −1, −2, −3, −4.  With these
     # weights, a CVXPY maximisation will yield the desired allocation.
 
-    # ❷  Build a NumPy weight array that matches the *order*
-    weights = -np.concatenate(
-        [
-            np.arange(len(bundle_vars))  # 0,-1,-2,…
-            for bundle_vars in updated_vars_by_agent.values()
-        ]
-    )
+    weighted_vars = []
+    for bundle_vars in updated_vars_by_agent.values():
+        for rank, bv in enumerate(bundle_vars):
+            weighted_vars.append(-rank * bv)
 
-    # ❸  Single dot-product node
-    objective = cp.Maximize(weights @ all_bundles_vars)
-
+    objective = cp.Maximize(cp.sum(weighted_vars))
     prob = cp.Problem(objective=objective, constraints=constraints)
     prob.solve()
 

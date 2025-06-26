@@ -14,15 +14,15 @@ from fairpyx import Instance, AllocationBuilder
 logger = logging.Logger(__name__)
 ########## Basic Instance for doctest ##########
 valuation = [[15, 33, 16, 6, 26], [34, 38, 4, 16, 8]]
-# instance = Instance(valuation)
+demo_instance = Instance(valuation)
 ###############################################
 
 
 def get_prop_value(instance: Instance, agent: Any) -> float:
     """
-    >>> get_prop_value(instance, 0)
+    >>> get_prop_value(demo_instance, 0)
     48.0
-    >>> get_prop_value(instance, 1)
+    >>> get_prop_value(demo_instance, 1)
     50.0
     """
     return instance.agent_bundle_value(agent, instance.items) / instance.num_of_agents
@@ -45,7 +45,7 @@ def is_minimal_bundle(bundle: Iterable, val_func: Callable, prop: float) -> bool
 def brute_force(instance: Instance, agent: Any) -> list:
     """
     >>> min_bundles = {(1, 4), (0, 2, 4), (1, 2), (0, 1), (2, 3, 4)}
-    >>> set(brute_force(instance, 0)) == min_bundles
+    >>> set(brute_force(demo_instance, 0)) == min_bundles
     True
     """
     prop = get_prop_value(instance, agent)
@@ -120,8 +120,7 @@ def iterative(instance: Instance, agent: Any) -> list:
                 idx_copy.append(i)
                 stack.append(idx_copy)
                 i += 1
-    res.sort(key=agent_bundle_value)
     return res    
         
 if __name__ == "__main__":
-    print(iterative(instance, 1))
+    print(iterative(demo_instance, 1))
