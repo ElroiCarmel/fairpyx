@@ -4,8 +4,6 @@ to other algorithms in terms of bundles proportionallity
 """
 
 import os
-import logging
-
 import experiments_csv as ex_csv
 import numpy as np
 import pandas as pd
@@ -16,11 +14,9 @@ from fairpyx.algorithms.maximally_proportional import maximally_proportional_all
 from fairpyx.algorithms import round_robin
 from fairpyx.algorithms.minimal_bundles_utils import brute_force, recursive, iterative
 from collections.abc import Callable
-from typing import Optional
 from random import sample
 from functools import partial
 
-BUNDLES_BOUND = 100
 SEEDS = sorted([234122, 389833, 12131])
 plt.style.use('seaborn-v0_8-white')
 
@@ -166,7 +162,6 @@ def parallel_algo_plots():
         "experiments", "results", "max_prop", "plots", "concurrent"
     )
     for nagents in range(2, 26):
-        # nagents = 19
         csv_path = os.path.join(ITERATIVE_DATA_PATH, f"{nagents}_agents.csv")
         df_iter = pd.read_csv(csv_path)
         mask = df_iter['min_bundles_strategy'] == 'iterative'
