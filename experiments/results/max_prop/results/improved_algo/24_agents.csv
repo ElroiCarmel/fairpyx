@@ -1,0 +1,3 @@
+nagents,nitems,seed,min_bundles_strategy,utility_sum,min_proportional_utility,runtime
+24,24,12131,iterative,1696,0.043043043043043044,128.3425743750413
+24,24,12131,recursive,1713,0.044,109.05093916598707
