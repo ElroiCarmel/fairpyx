@@ -7,9 +7,9 @@ Programmer: Elroi Carmel
 import logging
 from collections.abc import Callable, Iterable
 from functools import partial
-from itertools import combinations, accumulate, takewhile
+from itertools import combinations, accumulate
 from typing import Any
-from fairpyx import Instance, AllocationBuilder
+from fairpyx import Instance
 
 logger = logging.Logger(__name__)
 ########## Basic Instance for doctest ##########
@@ -19,7 +19,7 @@ demo_instance = Instance(valuation)
 
 
 def get_prop_value(instance: Instance, agent: Any) -> float:
-    """
+    """ß
     >>> get_prop_value(demo_instance, 0)
     48.0
     >>> get_prop_value(demo_instance, 1)
@@ -59,7 +59,7 @@ def brute_force(instance: Instance, agent: Any) -> list:
     return res
 
 
-def recursive(instance: Instance, agent: Any, sort_bundle: bool=True) -> list:
+def recursive(instance: Instance, agent: Any, sort_bundle: bool = True) -> list:
     prop = get_prop_value(instance, agent)
     res = []
     items_sorted = sorted(
@@ -105,7 +105,8 @@ def iterative(instance: Instance, agent: Any) -> list:
     )
     total_value = agent_bundle_value(instance.items)
     max_gain = [
-        total_value - x for x in accumulate(map(agent_item_value, items_sorted), initial=0)
+        total_value - x
+        for x in accumulate(map(agent_item_value, items_sorted), initial=0)
     ]
     stack = [[i] for i in range(len(items_sorted)) if max_gain[i] >= prop]  # indices
     while stack:
@@ -120,7 +121,8 @@ def iterative(instance: Instance, agent: Any) -> list:
                 idx_copy.append(i)
                 stack.append(idx_copy)
                 i += 1
-    return res    
-        
+    return res
+
+
 if __name__ == "__main__":
-    print(iterative(demo_instance, 1))
+    agent = 0
