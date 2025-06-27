@@ -95,6 +95,7 @@ def recursive(instance: Instance, agent: Any, sort_bundle: bool = True) -> list:
 
 def iterative(instance: Instance, agent: Any) -> list:
     prop = get_prop_value(instance, agent)
+    logger.debug("The proportional share of agent '%s' is %s.", agent, prop)
     res = []
     agent_item_value = partial(instance.agent_item_value, agent)
     agent_bundle_value = partial(instance.agent_bundle_value, agent)
@@ -103,26 +104,37 @@ def iterative(instance: Instance, agent: Any) -> list:
         key=agent_item_value,
         reverse=True,
     )
+    logger.debug("Sorted the items by value in decending order: %s.", items_sorted)
     total_value = agent_bundle_value(instance.items)
     max_gain = [
         total_value - x
         for x in accumulate(map(agent_item_value, items_sorted), initial=0)
     ]
     stack = [[i] for i in range(len(items_sorted)) if max_gain[i] >= prop]  # indices
+    logger.debug("The initial candidates for minimal bundles (indices) are %s.", stack)
     while stack:
         bundle_idx = stack.pop()
+        logger.debug("Assesing bundle (indices): %s.", bundle_idx)
         bundle_value = agent_bundle_value(map(items_sorted.__getitem__, bundle_idx))
+        logger.debug("Utility of bundle: %s.", bundle_value)
         if bundle_value >= prop:
             res.append([items_sorted[i] for i in bundle_idx])
+            logger.debug("New minimal bundle added (items): %s.", res[-1])
         else:
+            logger.debug("Utility not big enough.")
             i = bundle_idx[-1] + 1
             while i < len(items_sorted) and bundle_value + max_gain[i] >= prop:
                 idx_copy = bundle_idx.copy()
                 idx_copy.append(i)
                 stack.append(idx_copy)
                 i += 1
+    
+    logger.debug("Agent '%s' has %d minimal bundles.", agent, len(res))
     return res
 
 
 if __name__ == "__main__":
-    agent = 0
+    agent = 1
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(logging.StreamHandler())
+    print(iterative(demo_instance, agent))
