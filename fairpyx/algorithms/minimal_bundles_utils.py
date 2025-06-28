@@ -19,7 +19,7 @@ demo_instance = Instance(valuation)
 
 
 def get_prop_value(instance: Instance, agent: Any) -> float:
-    """ß
+    """
     >>> get_prop_value(demo_instance, 0)
     48.0
     >>> get_prop_value(demo_instance, 1)
@@ -94,47 +94,75 @@ def recursive(instance: Instance, agent: Any, sort_bundle: bool = True) -> list:
 
 
 def iterative(instance: Instance, agent: Any) -> list:
-    prop = get_prop_value(instance, agent)
-    logger.debug("The proportional share of agent '%s' is %s.", agent, prop)
-    res = []
-    agent_item_value = partial(instance.agent_item_value, agent)
-    agent_bundle_value = partial(instance.agent_bundle_value, agent)
+    proportional_share = get_prop_value(instance, agent)
+    logger.debug(
+        "The proportional share of agent '%s' is %s.", agent, proportional_share
+    )
+    minimal_bundles = []
     items_sorted = sorted(
         instance.items,
-        key=agent_item_value,
+        key=lambda item: instance.agent_item_value(agent, item),
         reverse=True,
     )
+    item_valuation = [instance.agent_item_value(agent, item) for item in items_sorted]
     logger.debug("Sorted the items by value in decending order: %s.", items_sorted)
-    total_value = agent_bundle_value(instance.items)
-    max_gain = [
-        total_value - x
-        for x in accumulate(map(agent_item_value, items_sorted), initial=0)
-    ]
-    stack = [[i] for i in range(len(items_sorted)) if max_gain[i] >= prop]  # indices
-    logger.debug("The initial candidates for minimal bundles (indices) are %s.", stack)
+    logger.debug("Item valuation: %s.", item_valuation)
+    
+    # max_gain[i] = the total value of item[i] till the last item
+    max_gain = list(accumulate(reversed(item_valuation)))
+    max_gain.reverse()
+    logger.debug("Max gain: %s.", max_gain)
+    
+    # consists of (bundle total value, index of the next item to add to bundle, the bundle)
+    stack = []
+    i = 0
+    # add only items that are potentionally part of minimal bundle
+    while max_gain[i] >= proportional_share:
+        stack.append((item_valuation[i], i + 1, [items_sorted[i]]))
+        i += 1
+    logger.debug(
+        "The initial candidates for minimal bundles are %s.", [x[2] for x in stack]
+    )
+
     while stack:
-        bundle_idx = stack.pop()
-        logger.debug("Assesing bundle (indices): %s.", bundle_idx)
-        bundle_value = agent_bundle_value(map(items_sorted.__getitem__, bundle_idx))
-        logger.debug("Utility of bundle: %s.", bundle_value)
-        if bundle_value >= prop:
-            res.append([items_sorted[i] for i in bundle_idx])
-            logger.debug("New minimal bundle added (items): %s.", res[-1])
+        bundle_value, next_item_ind, bundle = stack.pop()
+        logger.debug("Assesing bundle: %s. Utility: %s.", bundle, bundle_value)
+        if bundle_value >= proportional_share:
+            minimal_bundles.append(bundle)
+            logger.debug("*** Found minimal bundle!! ***")
         else:
             logger.debug("Utility not big enough.")
-            i = bundle_idx[-1] + 1
-            while i < len(items_sorted) and bundle_value + max_gain[i] >= prop:
-                idx_copy = bundle_idx.copy()
-                idx_copy.append(i)
-                stack.append(idx_copy)
-                i += 1
-    
-    logger.debug("Agent '%s' has %d minimal bundles.", agent, len(res))
-    return res
+            while (
+                next_item_ind < len(items_sorted)
+                and bundle_value + max_gain[next_item_ind] >= proportional_share
+            ):
+                bundle_copy = bundle.copy()
+                bundle_copy.append(items_sorted[next_item_ind])
+                stack.append(
+                    (
+                        bundle_value + item_valuation[next_item_ind],
+                        next_item_ind + 1,
+                        bundle_copy,
+                    )
+                )
+                next_item_ind += 1
+
+    logger.debug("Agent '%s' has %d minimal bundles.", agent, len(minimal_bundles))
+    return minimal_bundles
 
 
 if __name__ == "__main__":
     agent = 1
     logger.setLevel(logging.DEBUG)
     logger.addHandler(logging.StreamHandler())
-    print(iterative(demo_instance, agent))
+    instance = Instance.random_uniform(
+        num_of_agents=2,
+        num_of_items=8,
+        item_capacity_bounds=(1, 1),
+        agent_capacity_bounds=(6, 6),
+        item_base_value_bounds=(60, 100),
+        item_subjective_ratio_bounds=(0.6, 1.4),
+        normalized_sum_of_values=100,
+        random_seed=12324,
+    )
+    print(iterative(instance, "s1"))
