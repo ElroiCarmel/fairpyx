@@ -7,6 +7,7 @@ import os
 import experiments_csv as ex_csv
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from fairpyx import divide, Instance
 from fairpyx.algorithms.maximally_proportional import maximally_proportional_allocation
@@ -24,6 +25,7 @@ CSV_DIR = RESULTS_DIR / "results_csv"
 PLOTS_DIR = RESULTS_DIR / "plots"
 
 plt.style.use("seaborn-v0_8-white")
+
 
 def dividor(
     algorithm: Callable,
@@ -133,20 +135,36 @@ def improve_algo_plots():
     results_path = CSV_DIR / "improved_algo"
     plots_path = PLOTS_DIR / "improved_algo"
 
+    sns.set_theme()
     for nagents in range(2, 24):
         csv_path = results_path / f"{nagents}_agents.csv"
         df = pd.read_csv(csv_path)
         df = df.pivot_table(
-            index="nitems",
-            columns="min_bundles_strategy",
-            values="runtime",
+            index=["nitems", "min_bundles_strategy"],
+            values=["utility_sum", "min_proportional_utility", "runtime"],
+        ).reset_index()
+        # Convert to long-form
+        df = df.melt(
+            id_vars=["nitems", "min_bundles_strategy"],
+            value_vars=["utility_sum", "min_proportional_utility", "runtime"],
+            var_name="metric",
+            value_name="performance",
         )
-        ax = df.plot(title="Runtime")
-        fig = ax.get_figure()
-        fig.suptitle(f"{nagents} Agents")
-        plt.tight_layout()
-        fig.savefig(plots_path / f"{nagents}_agents.png", dpi=300)
-        plt.close(fig)
+        g = sns.relplot(
+            data=df,
+            kind="line",
+            x="nitems",
+            y="performance",
+            hue="min_bundles_strategy",
+            col="metric",
+            facet_kws=dict(sharey=False)
+        )
+        for ax, title in zip(g.axes.flat, ["Utility Sum", "Minimal Proportional Utility", "Runtime (sec)"]):
+            ax.set_title(title)
+        g.figure.suptitle(f"{nagents} Agents", y=1.05)
+        g.savefig(plots_path / f"{nagents}_agents.png", dpi=350)
+        plt.close()
+        
 
 
 def parallel_algo_plots():
@@ -175,5 +193,5 @@ if __name__ == "__main__":
     # run_multi_exp()
     # run_imroved_algo_exp()
     # comp_to_robin_plots()
-    # improve_algo_plots()
-    parallel_algo_plots()
+    improve_algo_plots()
+    # parallel_algo_plots()
