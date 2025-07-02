@@ -139,32 +139,32 @@ def improve_algo_plots():
     for nagents in range(2, 24):
         csv_path = results_path / f"{nagents}_agents.csv"
         df = pd.read_csv(csv_path)
-        df = df.pivot_table(
-            index=["nitems", "min_bundles_strategy"],
-            values=["utility_sum", "min_proportional_utility", "runtime"],
-        ).reset_index()
-        # Convert to long-form
-        df = df.melt(
-            id_vars=["nitems", "min_bundles_strategy"],
-            value_vars=["utility_sum", "min_proportional_utility", "runtime"],
-            var_name="metric",
-            value_name="performance",
+        metrics = ["utility_sum", "min_proportional_utility", "runtime"]
+        df = (
+            df.groupby(["nitems", "min_bundles_strategy"])[metrics]
+            .mean()
+            .stack()
+            .rename_axis(index=["nitems", "strategy", "metric"])
+            .reset_index(name="performance")
         )
         g = sns.relplot(
             data=df,
             kind="line",
             x="nitems",
             y="performance",
-            hue="min_bundles_strategy",
+            hue="strategy",
             col="metric",
-            facet_kws=dict(sharey=False)
+            facet_kws=dict(sharey=False),
         )
-        for ax, title in zip(g.axes.flat, ["Utility Sum", "Minimal Proportional Utility", "Runtime (sec)"]):
+        for ax, title in zip(
+            g.axes.flat,
+            ["Utility Sum", "Minimal Proportional Utility", "Runtime (sec)"],
+        ):
             ax.set_title(title)
         g.figure.suptitle(f"{nagents} Agents", y=1.05)
+        g.set_ylabels("Performance")
         g.savefig(plots_path / f"{nagents}_agents.png", dpi=350)
         plt.close()
-        
 
 
 def parallel_algo_plots():
