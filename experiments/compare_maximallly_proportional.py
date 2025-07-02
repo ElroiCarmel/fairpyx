@@ -5,7 +5,6 @@ to other algorithms in terms of bundles proportionallity
 
 import os
 import experiments_csv as ex_csv
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -16,16 +15,22 @@ from fairpyx.algorithms.minimal_bundles_utils import brute_force, recursive, ite
 from collections.abc import Callable
 from random import sample
 from functools import partial
+from pathlib import Path
 
 SEEDS = sorted([234122, 389833, 12131])
-plt.style.use('seaborn-v0_8-white')
+BASE_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = BASE_DIR / "results" / "max_prop"
+CSV_DIR = RESULTS_DIR / "results_csv"
+PLOTS_DIR = RESULTS_DIR / "plots"
+
+plt.style.use("seaborn-v0_8-white")
 
 def dividor(
     algorithm: Callable,
     seed: int,
     nagents: int | float,
     nitems: int,
-    min_bundles_strategy: Callable,
+    min_bundles_strategy: Callable = iterative,
     parallel: bool = False,
 ) -> dict:
     instance = Instance.random_uniform(
@@ -72,7 +77,6 @@ def run_multi_exp():
             "nagents": [nagents],
             "nitems": range(nagents, 51),
             "seed": seeds,
-            "min_bundles_bound": [None, 400],
             "algorithm": [maximally_proportional_allocation, round_robin],
         }
         # ex.clear_previous_results()
@@ -82,18 +86,17 @@ def run_multi_exp():
 def run_imroved_algo_exp():
     max_items = 70
     agents_range = range(23, 51)
+    results_folder = CSV_DIR / "improved_algo"
     for nagents in agents_range:
         ex = ex_csv.Experiment(
-            results_folder=os.path.join(
-                "results", "max_prop", "results", "improved_algo_v2"
-            ),
+            results_folder=results_folder,
             results_filename=f"{nagents}_agents.csv",
         )
         input_ranges = {
             "nagents": [nagents],
             "nitems": range(nagents, max_items + 1),
             "seed": SEEDS,
-            "min_bundles_strategy": [iterative, recursive],
+            "min_bundles_strategy": [brute_force, iterative, recursive],
         }
         # ex.clear_previous_results()
         ex.run_with_time_limit(
@@ -104,86 +107,70 @@ def run_imroved_algo_exp():
 
 
 def comp_to_robin_plots():
-    DATA_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "results", "to_round_robin"
-    )
-    PLOTS_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "plots", "to_round_robin"
-    )
-    plt.style.use('seaborn-v0_8-white')
+    results_path = CSV_DIR / "to_round_robin"
+    plots_path = PLOTS_DIR / "to_round_robin"
+
     for nagents in range(2, 24):
         fig, axes = plt.subplots(1, 2, sharey=False, figsize=(14, 6))
-        csv_path = os.path.join(DATA_FOLDER, f"{nagents}_agents.csv")
+        csv_path = results_path / f"{nagents}_agents.csv"
         df = pd.read_csv(csv_path)
         df = df.pivot_table(
             index="nitems",
             columns="algorithm",
             values=["utility_sum", "min_proportional_utility"],
         )
-        df['utility_sum'].plot(ax=axes[0], title='Utility Sum', legend=False)
-        df['min_proportional_utility'].plot(ax=axes[1], title='Minimal Proportional Utility')
+        df["utility_sum"].plot(ax=axes[0], title="Utility Sum", legend=False)
+        df["min_proportional_utility"].plot(
+            ax=axes[1], title="Minimal Proportional Utility"
+        )
         fig.suptitle(f"{nagents} Agents")
         plt.tight_layout()
-        fig.savefig(os.path.join(PLOTS_FOLDER, f"{nagents}_agents.png"), dpi=300)
+        fig.savefig(plots_path / f"{nagents}_agents.png", dpi=300)
         plt.close()
 
+
 def improve_algo_plots():
-    DATA_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "results", "improved_algo"
-    )
-    PLOTS_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "plots", "improved_algo"
-    )
-    
+    results_path = CSV_DIR / "improved_algo"
+    plots_path = PLOTS_DIR / "improved_algo"
+
     for nagents in range(2, 24):
-        csv_path = os.path.join(DATA_FOLDER, f"{nagents}_agents.csv")
+        csv_path = results_path / f"{nagents}_agents.csv"
         df = pd.read_csv(csv_path)
         df = df.pivot_table(
             index="nitems",
             columns="min_bundles_strategy",
-            values='runtime',
+            values="runtime",
         )
         ax = df.plot(title="Runtime")
         fig = ax.get_figure()
         fig.suptitle(f"{nagents} Agents")
         plt.tight_layout()
-        fig.savefig(os.path.join(PLOTS_FOLDER, f"{nagents}_agents.png"), dpi=300)
+        fig.savefig(plots_path / f"{nagents}_agents.png", dpi=300)
         plt.close(fig)
 
+
 def parallel_algo_plots():
-    
-    PARALLEL_DATA_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "results", "parallel"
-    )
-    ITERATIVE_DATA_PATH = os.path.join(
-        "experiments", "results", "max_prop", "results", "improved_algo"
-    )
-    PLOTS_FOLDER = os.path.join(
-        "experiments", "results", "max_prop", "plots", "concurrent"
-    )
+
+    parallel_csv_path = CSV_DIR / "parallel"
+    iterative_csv_path = CSV_DIR / "improved_algo"
+    plots_path = PLOTS_DIR / "concurrent"
     for nagents in range(2, 26):
-        csv_path = os.path.join(ITERATIVE_DATA_PATH, f"{nagents}_agents.csv")
+        csv_path = iterative_csv_path / f"{nagents}_agents.csv"
         df_iter = pd.read_csv(csv_path)
-        mask = df_iter['min_bundles_strategy'] == 'iterative'
-        df_iter = df_iter.loc[mask, ['nitems', 'seed', 'runtime']]
-        csv_path = os.path.join(PARALLEL_DATA_FOLDER, f"{nagents}_agents.csv")
-        df_parr = pd.read_csv(csv_path, usecols=['nitems', 'seed', 'runtime'])
-        df = pd.merge(left=df_iter,
-                right=df_parr,
-                how='outer',
-                on=['nitems', 'seed'])
-        df = df.pivot_table(index='nitems', values=['runtime_x', 'runtime_y'])
-        df.columns = ['iterative', 'parallel iterative']
+        mask = df_iter["min_bundles_strategy"] == "iterative"
+        df_iter = df_iter.loc[mask, ["nitems", "seed", "runtime"]]
+        csv_path = os.path.join(parallel_csv_path, f"{nagents}_agents.csv")
+        df_parr = pd.read_csv(csv_path, usecols=["nitems", "seed", "runtime"])
+        df = pd.merge(left=df_iter, right=df_parr, how="outer", on=["nitems", "seed"])
+        df = df.pivot_table(index="nitems", values=["runtime_x", "runtime_y"])
+        df.columns = ["iterative", "parallel iterative"]
         ax = df.plot(title=f"Runtime. {nagents} Agents")
         fig = ax.get_figure()
         plt.tight_layout()
-        fig.savefig(os.path.join(PLOTS_FOLDER, f"{nagents}_agents.png"), dpi=300)
+        fig.savefig(plots_path / f"{nagents}_agents.png", dpi=300)
         plt.close(fig)
-    
-    
-    
-    
-    
+
+
 if __name__ == "__main__":
     # run_multi_exp()
     # run_imroved_algo_exp()
